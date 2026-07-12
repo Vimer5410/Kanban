@@ -7,6 +7,7 @@ public enum BoardRole
     Viewer
 }
 
+
 public class UserRole
 {
     public int Id { get; set; }
