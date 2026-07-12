@@ -1,6 +1,5 @@
 using System.Text;
 using Kanban.Api.Data;
-using Kanban.Api.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -13,9 +12,6 @@ builder.Services.AddControllers()
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseSqlite(builder.Configuration.GetConnectionString("Default")));
-
-builder.Services.AddScoped<TokenService>();
-builder.Services.AddScoped<BoardAccessService>();
 
 var jwtSecret = builder.Configuration["Jwt:Secret"]!;
 

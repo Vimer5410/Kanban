@@ -1,13 +1,17 @@
+using System.Security.Claims;
 using Kanban.Api.Data;
-using Kanban.Api.Dtos;
-using Kanban.Api.Extensions;
 using Kanban.Api.Models;
-using Kanban.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Kanban.Api.Controllers;
+
+public record BoardDto(int Id, string Title, string? Description, int OwnerId, string OwnerUsername, BoardRole MyRole, DateTime CreatedAt);
+public record CreateBoardRequest(string Title, string? Description);
+public record UpdateBoardRequest(string Title, string? Description);
+public record AddMemberRequest(string Username, BoardRole Role);
+public record MemberDto(int UserId, string Username, BoardRole Role);
 
 [ApiController]
 [Route("api/boards")]
@@ -15,56 +19,77 @@ namespace Kanban.Api.Controllers;
 public class BoardsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly BoardAccessService _access;
 
-    public BoardsController(AppDbContext db, BoardAccessService access)
+    public BoardsController(AppDbContext db)
     {
         _db = db;
-        _access = access;
+    }
+
+    private int GetUserId()
+    {
+        return int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    }
+
+    // роль юзера на доске, null если доступа нет вообще
+    private async Task<BoardRole?> GetRole(int boardId, int userId)
+    {
+        var board = await _db.Boards.FindAsync(boardId);
+        if (board == null)
+            return null;
+
+        if (board.OwnerId == userId)
+            return BoardRole.Owner;
+
+        var member = await _db.UserRoles.FirstOrDefaultAsync(x => x.BoardId == boardId && x.UserId == userId);
+        if (member == null)
+            return null;
+
+        return member.Role;
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<BoardDto>>> GetMyBoards()
+    public async Task<IActionResult> GetMyBoards()
     {
-        var userId = User.GetUserId();
+        var userId = GetUserId();
 
-        var boards = await _db.Boards
-            .Include(b => b.Owner)
-            .Include(b => b.Members)
-            .Where(b => b.OwnerId == userId || b.Members.Any(m => m.UserId == userId))
-            .ToListAsync();
+        var owned = await _db.Boards.Where(b => b.OwnerId == userId).ToListAsync();
+        var memberBoardIds = await _db.UserRoles.Where(x => x.UserId == userId).Select(x => x.BoardId).ToListAsync();
+        var memberBoards = await _db.Boards.Where(b => memberBoardIds.Contains(b.Id)).ToListAsync();
 
-        var result = boards.Select(b => new BoardDto(
-            b.Id,
-            b.Title,
-            b.Description,
-            b.OwnerId,
-            b.Owner.Username,
-            b.OwnerId == userId ? BoardRole.Owner : b.Members.First(m => m.UserId == userId).Role,
-            b.CreatedAt));
+        var all = owned.Concat(memberBoards).GroupBy(b => b.Id).Select(g => g.First()).ToList();
+
+        var result = new List<BoardDto>();
+        foreach (var b in all)
+        {
+            var owner = await _db.Users.FindAsync(b.OwnerId);
+            var role = b.OwnerId == userId ? BoardRole.Owner : await GetRole(b.Id, userId);
+            result.Add(new BoardDto(b.Id, b.Title, b.Description, b.OwnerId, owner!.Username, role!.Value, b.CreatedAt));
+        }
 
         return Ok(result);
     }
 
     [HttpGet("{id}")]
-    public async Task<ActionResult<BoardDto>> GetBoard(int id)
+    public async Task<IActionResult> GetBoard(int id)
     {
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(id, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(id, userId);
+        if (role == null)
             return NotFound();
 
-        var board = await _db.Boards.Include(b => b.Owner).FirstAsync(b => b.Id == id);
-        return Ok(new BoardDto(board.Id, board.Title, board.Description, board.OwnerId, board.Owner.Username, role.Value, board.CreatedAt));
+        var board = await _db.Boards.FindAsync(id);
+        var owner = await _db.Users.FindAsync(board!.OwnerId);
+
+        return Ok(new BoardDto(board.Id, board.Title, board.Description, board.OwnerId, owner!.Username, role.Value, board.CreatedAt));
     }
 
     [HttpPost]
-    public async Task<ActionResult<BoardDto>> CreateBoard(CreateBoardRequest request)
+    public async Task<IActionResult> CreateBoard(CreateBoardRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Title))
             return BadRequest("Title обязателен.");
 
-        var userId = User.GetUserId();
+        var userId = GetUserId();
 
         var board = new Board
         {
@@ -86,9 +111,9 @@ public class BoardsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Title))
             return BadRequest("Title обязателен.");
 
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(id, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(id, userId);
+        if (role == null)
             return NotFound();
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
@@ -104,9 +129,9 @@ public class BoardsController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteBoard(int id)
     {
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(id, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(id, userId);
+        if (role == null)
             return NotFound();
         if (role != BoardRole.Owner)
             return Forbid();
@@ -119,22 +144,24 @@ public class BoardsController : ControllerBase
     }
 
     [HttpGet("{id}/members")]
-    public async Task<ActionResult<List<MemberDto>>> GetMembers(int id)
+    public async Task<IActionResult> GetMembers(int id)
     {
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(id, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(id, userId);
+        if (role == null)
             return NotFound();
 
-        var board = await _db.Boards.Include(b => b.Owner).FirstAsync(b => b.Id == id);
-        var members = await _db.UserRoles
-            .Include(ur => ur.User)
-            .Where(ur => ur.BoardId == id)
-            .Select(ur => new MemberDto(ur.UserId, ur.User.Username, ur.Role))
-            .ToListAsync();
+        var board = await _db.Boards.FindAsync(id);
+        var owner = await _db.Users.FindAsync(board!.OwnerId);
 
-        var result = new List<MemberDto> { new(board.OwnerId, board.Owner.Username, BoardRole.Owner) };
-        result.AddRange(members);
+        var members = await _db.UserRoles.Where(x => x.BoardId == id).ToListAsync();
+
+        var result = new List<MemberDto> { new MemberDto(board.OwnerId, owner!.Username, BoardRole.Owner) };
+        foreach (var m in members)
+        {
+            var u = await _db.Users.FindAsync(m.UserId);
+            result.Add(new MemberDto(m.UserId, u!.Username, m.Role));
+        }
 
         return Ok(result);
     }
@@ -143,30 +170,32 @@ public class BoardsController : ControllerBase
     public async Task<IActionResult> AddMember(int id, AddMemberRequest request)
     {
         if (request.Role == BoardRole.Owner)
-            return BadRequest("Owner привязан к владельцу доски, участнику эту роль назначить нельзя.");
+            return BadRequest("Owner нельзя назначить участнику.");
 
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(id, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(id, userId);
+        if (role == null)
             return NotFound();
         if (role != BoardRole.Owner)
             return Forbid();
 
         var targetUser = await _db.Users.SingleOrDefaultAsync(u => u.Username == request.Username);
-        if (targetUser is null)
+        if (targetUser == null)
             return NotFound("Юзер не найден.");
 
         var board = await _db.Boards.FindAsync(id);
         if (targetUser.Id == board!.OwnerId)
             return BadRequest("Это уже владелец доски.");
 
-        var existing = await _db.UserRoles
-            .FirstOrDefaultAsync(ur => ur.BoardId == id && ur.UserId == targetUser.Id);
-
-        if (existing is not null)
+        var existing = await _db.UserRoles.FirstOrDefaultAsync(x => x.BoardId == id && x.UserId == targetUser.Id);
+        if (existing != null)
+        {
             existing.Role = request.Role;
+        }
         else
+        {
             _db.UserRoles.Add(new UserRole { BoardId = id, UserId = targetUser.Id, Role = request.Role });
+        }
 
         await _db.SaveChangesAsync();
         return NoContent();
@@ -175,16 +204,15 @@ public class BoardsController : ControllerBase
     [HttpDelete("{id}/members/{userId}")]
     public async Task<IActionResult> RemoveMember(int id, int userId)
     {
-        var currentUserId = User.GetUserId();
-        var role = await _access.GetRoleAsync(id, currentUserId);
-        if (role is null)
+        var currentUserId = GetUserId();
+        var role = await GetRole(id, currentUserId);
+        if (role == null)
             return NotFound();
         if (role != BoardRole.Owner)
             return Forbid();
 
-        var membership = await _db.UserRoles
-            .FirstOrDefaultAsync(ur => ur.BoardId == id && ur.UserId == userId);
-        if (membership is null)
+        var membership = await _db.UserRoles.FirstOrDefaultAsync(x => x.BoardId == id && x.UserId == userId);
+        if (membership == null)
             return NotFound();
 
         _db.UserRoles.Remove(membership);

@@ -1,13 +1,15 @@
+using System.Security.Claims;
 using Kanban.Api.Data;
-using Kanban.Api.Dtos;
-using Kanban.Api.Extensions;
 using Kanban.Api.Models;
-using Kanban.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 
 namespace Kanban.Api.Controllers;
+
+public record ColumnDto(int Id, int BoardId, string Title, int Order);
+public record CreateColumnRequest(string Title);
+public record UpdateColumnRequest(string Title, int Order);
 
 [ApiController]
 [Route("api/boards/{boardId}/columns")]
@@ -15,48 +17,62 @@ namespace Kanban.Api.Controllers;
 public class ColumnsController : ControllerBase
 {
     private readonly AppDbContext _db;
-    private readonly BoardAccessService _access;
 
-    public ColumnsController(AppDbContext db, BoardAccessService access)
+    public ColumnsController(AppDbContext db)
     {
         _db = db;
-        _access = access;
+    }
+
+    private int GetUserId()
+    {
+        return int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
+    }
+
+    private async Task<BoardRole?> GetRole(int boardId, int userId)
+    {
+        var board = await _db.Boards.FindAsync(boardId);
+        if (board == null)
+            return null;
+
+        if (board.OwnerId == userId)
+            return BoardRole.Owner;
+
+        var member = await _db.UserRoles.FirstOrDefaultAsync(x => x.BoardId == boardId && x.UserId == userId);
+        if (member == null)
+            return null;
+
+        return member.Role;
     }
 
     [HttpGet]
-    public async Task<ActionResult<List<ColumnDto>>> GetColumns(int boardId)
+    public async Task<IActionResult> GetColumns(int boardId)
     {
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(boardId, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(boardId, userId);
+        if (role == null)
             return NotFound();
 
-        var columns = await _db.Columns
-            .Where(c => c.BoardId == boardId)
-            .OrderBy(c => c.Order)
-            .Select(c => new ColumnDto(c.Id, c.BoardId, c.Title, c.Order))
-            .ToListAsync();
+        var columns = await _db.Columns.Where(c => c.BoardId == boardId).OrderBy(c => c.Order).ToListAsync();
+        var result = columns.Select(c => new ColumnDto(c.Id, c.BoardId, c.Title, c.Order)).ToList();
 
-        return Ok(columns);
+        return Ok(result);
     }
 
     [HttpPost]
-    public async Task<ActionResult<ColumnDto>> CreateColumn(int boardId, CreateColumnRequest request)
+    public async Task<IActionResult> CreateColumn(int boardId, CreateColumnRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Title))
             return BadRequest("Title обязателен.");
 
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(boardId, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(boardId, userId);
+        if (role == null)
             return NotFound();
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
 
-        var maxOrder = await _db.Columns
-            .Where(c => c.BoardId == boardId)
-            .Select(c => (int?)c.Order)
-            .MaxAsync() ?? 0;
+        var existing = await _db.Columns.Where(c => c.BoardId == boardId).ToListAsync();
+        var maxOrder = existing.Count > 0 ? existing.Max(c => c.Order) : 0;
 
         var column = new BoardColumn
         {
@@ -77,15 +93,15 @@ public class ColumnsController : ControllerBase
         if (string.IsNullOrWhiteSpace(request.Title))
             return BadRequest("Title обязателен.");
 
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(boardId, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(boardId, userId);
+        if (role == null)
             return NotFound();
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
 
         var column = await _db.Columns.FirstOrDefaultAsync(c => c.Id == id && c.BoardId == boardId);
-        if (column is null)
+        if (column == null)
             return NotFound();
 
         column.Title = request.Title;
@@ -98,15 +114,15 @@ public class ColumnsController : ControllerBase
     [HttpDelete("{id}")]
     public async Task<IActionResult> DeleteColumn(int boardId, int id)
     {
-        var userId = User.GetUserId();
-        var role = await _access.GetRoleAsync(boardId, userId);
-        if (role is null)
+        var userId = GetUserId();
+        var role = await GetRole(boardId, userId);
+        if (role == null)
             return NotFound();
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
 
         var column = await _db.Columns.FirstOrDefaultAsync(c => c.Id == id && c.BoardId == boardId);
-        if (column is null)
+        if (column == null)
             return NotFound();
 
         _db.Columns.Remove(column);
