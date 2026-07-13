@@ -46,10 +46,19 @@ POST `/api/boards/{boardId}/columns` — { title } → owner/editor
 PUT `/api/boards/{boardId}/columns/{id}` — { title, order } → owner/editor
 DELETE `/api/boards/{boardId}/columns/{id}` — owner/editor
 
+## Карточки
+
+GET `/api/boards/{boardId}/columns/{columnId}/cards` — список, любая роль
+POST `.../cards` — { title, description, deadline, assigneeId } → owner/editor
+PUT `.../cards/{id}` — правка title/description/deadline/assignee
+DELETE `.../cards/{id}` — owner/editor
+PUT `.../cards/{id}/move` — { columnId, order } → drag-and-drop, owner/editor
+
 ## Статус
 
 Коммит 1: структура решения, сущности, DbContext, пустой WPF-клиент.
 Коммит 2: register/login/me, JWT, PBKDF2-хэш пароля.
 Коммит 3: CRUD досок + участники/роли.
 Коммит 4: CRUD колонок.
-CRUD карточек + drag-and-drop, комментарии — в следующих коммитах.
+Коммит 5: CRUD карточек + move (drag-and-drop).
+Комментарии — в следующем коммите.

@@ -30,7 +30,7 @@ public class BoardsController : ControllerBase
         return int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
     }
 
-    // роль юзера на доске, null если доступа нет вообще
+    
     private async Task<BoardRole?> GetRole(int boardId, int userId)
     {
         var board = await _db.Boards.FindAsync(boardId);
