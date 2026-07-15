@@ -45,6 +45,11 @@ public class CardsController : ControllerBase
         return member.Role;
     }
 
+    private async Task<bool> ColumnBelongsToBoard(int columnId, int boardId)
+    {
+        return await _db.Columns.AnyAsync(c => c.Id == columnId && c.BoardId == boardId);
+    }
+
     private async Task<CardDto> ToDto(Card c)
     {
         string? assigneeUsername = null;
@@ -65,8 +70,7 @@ public class CardsController : ControllerBase
         if (role == null)
             return NotFound();
 
-        var column = await _db.Columns.FirstOrDefaultAsync(c => c.Id == columnId && c.BoardId == boardId);
-        if (column == null)
+        if (!await ColumnBelongsToBoard(columnId, boardId))
             return NotFound();
 
         var cards = await _db.Cards.Where(c => c.ColumnId == columnId).OrderBy(c => c.Order).ToListAsync();
@@ -86,6 +90,9 @@ public class CardsController : ControllerBase
         var userId = GetUserId();
         var role = await GetRole(boardId, userId);
         if (role == null)
+            return NotFound();
+
+        if (!await ColumnBelongsToBoard(columnId, boardId))
             return NotFound();
 
         var card = await _db.Cards.FirstOrDefaultAsync(c => c.Id == id && c.ColumnId == columnId);
@@ -108,8 +115,7 @@ public class CardsController : ControllerBase
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
 
-        var column = await _db.Columns.FirstOrDefaultAsync(c => c.Id == columnId && c.BoardId == boardId);
-        if (column == null)
+        if (!await ColumnBelongsToBoard(columnId, boardId))
             return NotFound();
 
         if (request.AssigneeId != null)
@@ -151,6 +157,9 @@ public class CardsController : ControllerBase
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
 
+        if (!await ColumnBelongsToBoard(columnId, boardId))
+            return NotFound();
+
         var card = await _db.Cards.FirstOrDefaultAsync(c => c.Id == id && c.ColumnId == columnId);
         if (card == null)
             return NotFound();
@@ -181,6 +190,9 @@ public class CardsController : ControllerBase
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
 
+        if (!await ColumnBelongsToBoard(columnId, boardId))
+            return NotFound();
+
         var card = await _db.Cards.FirstOrDefaultAsync(c => c.Id == id && c.ColumnId == columnId);
         if (card == null)
             return NotFound();
@@ -201,12 +213,14 @@ public class CardsController : ControllerBase
         if (role != BoardRole.Owner && role != BoardRole.Editor)
             return Forbid();
 
+        if (!await ColumnBelongsToBoard(columnId, boardId))
+            return NotFound();
+
         var card = await _db.Cards.FirstOrDefaultAsync(c => c.Id == id && c.ColumnId == columnId);
         if (card == null)
             return NotFound();
 
-        var targetColumn = await _db.Columns.FirstOrDefaultAsync(c => c.Id == request.ColumnId && c.BoardId == boardId);
-        if (targetColumn == null)
+        if (!await ColumnBelongsToBoard(request.ColumnId, boardId))
             return BadRequest("Колонка назначения не найдена на этой доске.");
 
         card.ColumnId = request.ColumnId;

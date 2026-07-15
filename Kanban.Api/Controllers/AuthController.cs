@@ -70,8 +70,6 @@ public class AuthController : ControllerBase
         return Ok(username);
     }
 
-    // --- пароль: PBKDF2, свой салт на юзера ---
-
     private static string HashPassword(string password)
     {
         var salt = RandomNumberGenerator.GetBytes(16);
@@ -91,8 +89,6 @@ public class AuthController : ControllerBase
 
         return CryptographicOperations.FixedTimeEquals(actual, expected);
     }
-
-    // --- JWT ---
 
     private string CreateToken(User user)
     {

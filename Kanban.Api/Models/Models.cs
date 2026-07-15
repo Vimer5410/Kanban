@@ -1,6 +1,3 @@
-using System;
-using System.Collections.Generic;
-
 namespace Kanban.Api.Models;
 
 public class User

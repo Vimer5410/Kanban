@@ -30,7 +30,6 @@ public class BoardsController : ControllerBase
         return int.Parse(User.FindFirstValue(ClaimTypes.NameIdentifier)!);
     }
 
-    
     private async Task<BoardRole?> GetRole(int boardId, int userId)
     {
         var board = await _db.Boards.FindAsync(boardId);

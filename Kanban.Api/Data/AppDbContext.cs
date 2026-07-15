@@ -24,7 +24,6 @@ public class AppDbContext : DbContext
             .HasIndex(ur => new { ur.UserId, ur.BoardId })
             .IsUnique();
 
-       
         modelBuilder.Entity<Board>()
             .HasOne(b => b.Owner)
             .WithMany()
